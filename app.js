@@ -170,7 +170,14 @@ function setupPresence() {
         if (snapshot.val() == false) return;
 
         userStatusDatabaseRef.onDisconnect().set(isOfflineForDatabase).then(() => {
-            userStatusDatabaseRef.set(isOnlineForDatabase);
+            userStatusDatabaseRef.set(isOnlineForDatabase).catch(err => {
+                if (err.code === 'PERMISSION_DENIED') {
+                    alert("ERROR DATABASE: Tidak bisa menulis data!\n\nPenyebab: Anda mungkin belum mengatur 'Security Rules' ke 'Test Mode'.\n\nSolusi: Buka Firebase Console -> Realtime Database -> Rules -> Ubah '.read': false menjadi true, dan '.write': false menjadi true.");
+                } else {
+                    console.error("Presence Error:", err);
+                }
+            });
+
             userProfileRef.update({
                 id: STATE.myId,
                 gender: STATE.settings.gender,
@@ -254,6 +261,12 @@ function loadUsersGrid() {
 
         if (!found) {
             dom.grid.innerHTML = `<p style="text-align:center; width:100%; grid-column:1/-1; color:var(--text-muted)">Searching for active users...</p>`;
+        }
+    }, (error) => {
+        if (error.code === 'PERMISSION_DENIED') {
+            console.error("Read Permission Denied");
+            // We already alert on write, but this confirms it.
+            alert("ERROR: Tidak bisa membaca data user online. Periksa Security Rules di Firebase Console Anda!");
         }
     });
 }
