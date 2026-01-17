@@ -1,11 +1,11 @@
 // --- FIREBASE CONFIGURATION (PASTE KEYS HERE) ---
 const firebaseConfig = {
     apiKey: "AIzaSyD--YQOiniI1Rdrx8tFvtsu-ZoOZjR5BlA",
-  authDomain: "stranger-99.firebaseapp.com",
-  projectId: "stranger-99",
-  storageBucket: "stranger-99.firebasestorage.app",
-  messagingSenderId: "419674409538",
-  appId: "1:419674409538:web:0b32d852a8202e6bfd3bdb"
+    authDomain: "stranger-99.firebaseapp.com",
+    projectId: "stranger-99",
+    storageBucket: "stranger-99.firebasestorage.app",
+    messagingSenderId: "419674409538",
+    appId: "1:419674409538:web:0b32d852a8202e6bfd3bdb"
 };
 
 // Initialize Firebase
@@ -79,28 +79,36 @@ const dom = {
 };
 
 // --- AUTHENTICATION & STARTUP ---
-dom.btnRegister.onclick = () => {
+// --- AUTHENTICATION & STARTUP ---
+// Remove manual button wait, auto-login immediately
+document.addEventListener('DOMContentLoaded', () => {
+    // Check if config is set
     if (firebaseConfig.apiKey === "GANTI_DENGAN_API_KEY_ANDA") {
-        alert("PERHATIAN: Anda belum memasukkan Kunci Firebase di app.js! Baca PANDUAN_LENGKAP.md");
+        alert("PERHATIAN: Kunci Firebase belum diset di app.js!");
         return;
     }
 
+    // Show loading UI
     dom.btnRegister.classList.add('hidden');
     dom.registrationInfo.classList.remove('hidden');
 
+    // Attempt Login
     auth.signInAnonymously()
         .then((userCredential) => {
-            // Signed in..
-            const user = userCredential.user;
-            console.log("Logged in as", user.uid);
+            console.log("Logged in as", userCredential.user.uid);
+            // initUser will be called by onAuthStateChanged
         })
         .catch((error) => {
-            console.error(error);
-            alert("Error login: " + error.message);
+            console.error("Login Failed:", error);
+            alert("Gagal masuk: " + error.message);
+            // If failed, show button to retry
+            dom.btnRegister.textContent = "Retry Connection";
             dom.btnRegister.classList.remove('hidden');
             dom.registrationInfo.classList.add('hidden');
+
+            dom.btnRegister.onclick = () => location.reload();
         });
-};
+});
 
 // Auth State Observer
 if (auth) {
