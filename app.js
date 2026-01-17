@@ -253,9 +253,12 @@ function loadUsersGrid() {
         let found = false;
         Object.keys(users).forEach(uid => {
             const user = users[uid];
-            if (user.state === 'online' && uid !== STATE.uid) {
+            // DEBUG: Menampilkan semua user (termasuk diri sendiri) untuk memastikan data masuk
+            // if (user.state === 'online' && uid !== STATE.uid) { 
+            if (user.state === 'online') {
                 found = true;
-                createProfileCard(uid, user);
+                const isMe = uid === STATE.uid;
+                createProfileCard(uid, user, isMe);
             }
         });
 
@@ -271,7 +274,7 @@ function loadUsersGrid() {
     });
 }
 
-function createProfileCard(uid, user) {
+function createProfileCard(uid, user, isMe = false) {
     const card = document.createElement('div');
     card.className = 'profile-card fade-in';
 
@@ -280,15 +283,18 @@ function createProfileCard(uid, user) {
     if (user.gender === 'Female') genderColor = "#f093fb";
     if (user.gender === 'Non-binary') genderColor = "#f6d365";
 
+    const nameLabel = user.id || 'Anon';
+    const displayLabel = isMe ? `${nameLabel} (YOU)` : nameLabel;
+
     card.innerHTML = `
         <div class="profile-avatar" style="background: ${genderColor}">
             <div class="profile-status-dot status-online"></div>
         </div>
-        <div class="profile-name">${user.id || 'Anon'}</div>
+        <div class="profile-name">${displayLabel}</div>
         <div class="profile-info">
             <span>${user.gender || '?'}</span> • <span>${user.interest || '?'}</span>
         </div>
-        <button class="btn-tiny" style="margin-top:8px; width:100%">Chat</button>
+        <button class="btn-tiny" style="margin-top:8px; width:100%" ${isMe ? 'disabled' : ''}>${isMe ? 'It\'s You' : 'Chat'}</button>
     `;
 
     card.onclick = () => startPrivateChat(uid, user.id);
