@@ -1,450 +1,529 @@
+const isLocalhost = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+const hubUrl = isLocalhost ? "/chatHub" : "https://my-chat-backend-production-2b56.up.railway.app/chatHub";
 
-// Import Firebase SDKs
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-import { getDatabase, ref, set, onDisconnect, onValue, push, remove, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+const connection = new signalR.HubConnectionBuilder()
+    .withUrl(hubUrl)
+    .withAutomaticReconnect()
+    .build();
 
-// --- CONFIGURATION ---
-// User must replace this with their own config from Firebase Console
-const firebaseConfig = {
-    apiKey: "AIzaSyD--YQOiniI1Rdrx8tFvtsu-ZoOZjR5BlA",
-    authDomain: "stranger-99.firebaseapp.com",
-    databaseURL: "https://stranger-99-default-rtdb.firebaseio.com",
-    projectId: "stranger-99",
-    storageBucket: "stranger-99.firebasestorage.app",
-    messagingSenderId: "419674409538",
-    appId: "1:419674409538:web:0b32d852a8202e6bfd3bdb"
+const STORAGE_KEY = 'glowme_user_id';
+
+const authSection = document.getElementById('auth-section');
+const chatSection = document.getElementById('chat-section');
+const registrationInfo = document.getElementById('registration-info');
+const btnRegister = document.getElementById('btn-register');
+const btnEnterChat = document.getElementById('btn-enter-chat');
+const myIdDisplay = document.getElementById('my-id');
+const displayIdHead = document.getElementById('display-id');
+const messagesList = document.getElementById('messages');
+const messageInput = document.getElementById('message-input');
+const targetIdInput = document.getElementById('target-id');
+const btnSend = document.getElementById('btn-send');
+const btnLogout = document.getElementById('btn-logout');
+const btnEditId = document.getElementById('btn-edit-id');
+const recipientIndicator = document.getElementById('recipient-indicator');
+const unreadAlert = document.getElementById('unread-alert');
+const unreadCountSpan = document.getElementById('unread-count');
+const btnOpenUnread = document.getElementById('btn-open-unread');
+const btnViewOnline = document.getElementById('btn-view-online');
+const onlineModal = document.getElementById('online-modal');
+const btnCloseOnline = document.getElementById('btn-close-online');
+const onlineModalList = document.getElementById('online-modal-list');
+const btnSettings = document.getElementById('btn-settings');
+const settingsModal = document.getElementById('settings-modal');
+const btnCloseSettings = document.getElementById('btn-close-settings');
+const selectGender = document.getElementById('select-gender');
+const selectInterest = document.getElementById('select-interest');
+const btnSaveSettings = document.getElementById('btn-save-settings');
+const genderSymbolDisplay = document.getElementById('gender-symbol');
+const SETTINGS_KEY = 'glowme_user_settings';
+const GENDER_SYMBOLS = {
+    "Male": "♂",
+    "Female": "♀",
+    "Non-binary": "⚧"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getDatabase(app);
+// Play Together Elements
+const btnPlayTogether = document.getElementById('btn-play-together');
+const btnStartGame = document.getElementById('btn-start-game');
+const matchDot = document.getElementById('match-dot');
+const matchText = document.getElementById('match-text');
+const gameOverlay = document.getElementById('game-overlay');
+const btnExitGame = document.getElementById('btn-exit-game');
+const gameRole = document.getElementById('game-role');
+const gameBall = document.getElementById('game-ball');
+const gameControls = document.getElementById('game-controls');
+const speedSlider = document.getElementById('speed-slider');
+// No longer used in sidebar:
+// const onlineUsersList = document.getElementById('online-users-list');
 
-// --- STATE ---
-let currentUser = null;
-let currentPartnerId = null;
+// Selection Modal Elements
+const btnSelectUser = document.getElementById('btn-select-user');
+const userModal = document.getElementById('user-modal');
+const btnCloseModal = document.getElementById('btn-close-modal');
+const modalUserList = document.getElementById('modal-user-list');
+
 let myId = null;
-let isGameHost = false; // Is this user the one controlling settings?
-let gameSpeed = 10;
-let gameInterval = null;
+let isController = false;
+let currentBallSpeed = 10;
+let ballDirection = 1; // 1 for down, -1 for up
+let ballPosY = 50;
+let gameActive = false;
+let onlineUsers = [];
 
-// --- DOM ELEMENTS ---
-const appScreens = {
-    auth: document.getElementById('auth-section'),
-    chat: document.getElementById('chat-section'),
-    game: document.getElementById('game-overlay')
-};
+// SignalR Events
+connection.on("UserRegistered", (id) => {
+    // If myId was already set and is different, it means we successfully changed it
+    if (myId && myId !== id) {
+        alert(`Success! Your ID has been changed to: ${id}`);
+    }
 
-const ui = {
-    myIdDisplay: document.getElementById('my-id'),
-    displayId: document.getElementById('display-id'),
-    btnRegister: document.getElementById('btn-register'),
-    btnEnterChat: document.getElementById('btn-enter-chat'),
-    regInfo: document.getElementById('registration-info'),
+    myId = id;
+    localStorage.setItem(STORAGE_KEY, id); // Simpan ID agar tetap sama besok
+    myIdDisplay.textContent = id;
+    displayIdHead.textContent = `ID: ${id}`;
+    btnRegister.classList.add('hidden');
+    registrationInfo.classList.remove('hidden');
 
-    onlineModal: document.getElementById('online-modal'),
-    onlineList: document.getElementById('online-modal-list'),
-    btnViewOnline: document.getElementById('btn-view-online'),
-    btnCloseOnline: document.getElementById('btn-close-online'),
-
-    userModal: document.getElementById('user-modal'),
-    userList: document.getElementById('modal-user-list'),
-    btnSelectUser: document.getElementById('btn-select-user'),
-    btnCloseUser: document.getElementById('btn-close-modal'),
-
-    msgInput: document.getElementById('message-input'),
-    btnSend: document.getElementById('btn-send'),
-    msgList: document.getElementById('messages'),
-    targetIdInput: document.getElementById('target-id'),
-    recipientIndicator: document.getElementById('recipient-indicator'),
-
-    gameBall: document.getElementById('game-ball'),
-    gameSpeedSlider: document.getElementById('speed-slider'),
-    btnPlay: document.getElementById('btn-play-together'),
-    btnStartGame: document.getElementById('btn-start-game'),
-    btnExitGame: document.getElementById('btn-exit-game'),
-    gamePartnerName: document.getElementById('game-partner-name'),
-    gameRole: document.getElementById('game-role'),
-    gameControls: document.getElementById('game-controls'),
-
-    settingsModal: document.getElementById('settings-modal'),
-    btnSettings: document.getElementById('btn-settings'),
-    btnCloseSettings: document.getElementById('btn-close-settings'),
-    btnSaveSettings: document.getElementById('btn-save-settings'),
-    selectGender: document.getElementById('select-gender'),
-    selectInterest: document.getElementById('select-interest'),
-};
-
-// --- AUTHENTICATION ---
-ui.btnRegister.addEventListener('click', () => {
-    signInAnonymously(auth).catch((error) => {
-        console.error("Auth Error:", error);
-        alert("Gagal login: " + error.message);
-    });
+    // Sync profile settings if they exist
+    const savedSettings = localStorage.getItem(SETTINGS_KEY);
+    if (savedSettings) {
+        const { gender, interest } = JSON.parse(savedSettings);
+        connection.invoke("UpdateProfile", gender, interest).catch(console.error);
+        updateGenderSymbol(gender);
+    }
 });
 
-onAuthStateChanged(auth, (user) => {
-    if (user) {
-        // User is signed in.
-        currentUser = user;
-        // Generate a simple 5-char ID from the UID for readability
-        myId = user.uid.substring(0, 5).toUpperCase();
+connection.on("ReceiveMessage", (senderId, message) => {
+    appendMessage(senderId, message, 'received');
+});
 
-        ui.myIdDisplay.textContent = myId;
-        ui.displayId.textContent = "ID: " + myId;
+connection.on("Error", (msg) => {
+    alert(msg);
+});
 
-        ui.btnRegister.classList.add('hidden');
-        ui.regInfo.classList.remove('hidden');
+connection.on("ProfileUpdated", (gender, interest) => {
+    console.log(`Profile updated: ${gender}, ${interest}`);
+});
 
-        // Setup Presence
-        setupPresence(user.uid, myId);
-
-        // Listen for Signals (Messages, Invites)
-        setupSignalListener(user.uid);
+connection.on("UnreadNotification", (count) => {
+    if (count > 0) {
+        unreadAlert.classList.remove('hidden');
+        unreadCountSpan.textContent = count;
     } else {
-        // User is signed out.
+        unreadAlert.classList.add('hidden');
     }
 });
 
-ui.btnEnterChat.addEventListener('click', () => {
-    appScreens.auth.classList.add('hidden');
-    appScreens.chat.classList.remove('hidden');
-
-    // Load persisted settings
-    const savedGender = localStorage.getItem('glowme_gender') || 'Male';
-    const savedInterest = localStorage.getItem('glowme_interest') || 'Female';
-    ui.selectGender.value = savedGender;
-    ui.selectInterest.value = savedInterest;
-
-    updateUserProfile(savedGender, savedInterest);
+connection.on("MatchmakingStatus", (status) => {
+    matchText.textContent = status;
+    matchDot.className = `dot dot-${status.toLowerCase()}`;
+    if (status === 'Idle') {
+        btnPlayTogether.textContent = "Play Now";
+        btnPlayTogether.classList.remove('hidden');
+        btnStartGame.classList.add('hidden');
+    }
 });
 
-// --- PRESENCE SYSTEM ---
-function setupPresence(uid, shortId) {
-    const userRef = ref(db, 'users/' + uid);
-    const connectionRef = ref(db, '.info/connected');
+connection.on("MatchFound", (partnerId, canControl) => {
+    matchText.textContent = `Matched with ${partnerId}`;
+    matchDot.className = 'dot dot-matched';
+    btnPlayTogether.classList.add('hidden');
+    btnStartGame.classList.remove('hidden');
+    isController = canControl;
+});
 
-    onValue(connectionRef, (snap) => {
-        if (snap.val() === true) {
-            const gender = localStorage.getItem('glowme_gender') || 'Unknown';
-            const interest = localStorage.getItem('glowme_interest') || 'Unknown';
+connection.on("GameStart", () => {
+    gameOverlay.classList.remove('hidden');
+    gameActive = true;
 
-            set(userRef, {
-                id: shortId,
-                online: true,
-                gender: gender,
-                interest: interest,
-                lastSeen: serverTimestamp()
-            });
+    // Reset Ball State
+    ballPosY = 50;
+    ballDirection = 1;
+    gameBall.style.top = "50%"; // Visual reset immediately
 
-            onDisconnect(userRef).remove();
-        }
-    });
-
-    // Listen for other users to populate lists
-    const allUsersRef = ref(db, 'users');
-    onValue(allUsersRef, (snapshot) => {
-        const users = snapshot.val() || {};
-        renderOnlineUsers(users);
-    });
-}
-
-function updateUserProfile(gender, interest) {
-    if (!currentUser) return;
-    localStorage.setItem('glowme_gender', gender);
-    localStorage.setItem('glowme_interest', interest);
-
-    const userRef = ref(db, 'users/' + currentUser.uid);
-    // Only update specific fields to avoid overwriting presence
-    // Note: set() overwrites. update() is better here.
-    // Using simple set for now as we re-set on connect.
-    // Let's use re-set logic safely.
-    // But since we are client-side, we can just set.
-    set(userRef, {
-        id: myId,
-        online: true,
-        gender: gender,
-        interest: interest,
-        lastSeen: serverTimestamp()
-    });
-}
-
-
-// --- SIGNAL / MESSAGING SYSTEM ---
-// We use a 'signals' path to send ephemeral data to specific users
-function setupSignalListener(uid) {
-    const mySignalsRef = ref(db, 'signals/' + uid); // We listen to OUR inbox
-
-    // When a new signal is added
-    onValue(mySignalsRef, (snapshot) => {
-        const signals = snapshot.val();
-        if (!signals) return;
-
-        Object.keys(signals).forEach(key => {
-            const signal = signals[key];
-            handleSignal(signal);
-
-            // Remove signal after processing so we don't process it again
-            remove(ref(db, 'signals/' + uid + '/' + key));
-        });
-    });
-}
-
-function sendSignal(targetUid, type, data) {
-    const targetRef = ref(db, 'signals/' + targetUid);
-    push(targetRef, {
-        type: type,
-        from: currentUser.uid,
-        fromId: myId,
-        data: data,
-        timestamp: serverTimestamp()
-    });
-}
-
-// Find UID by Short ID (Helper)
-// In a real app we'd index this. For now we loop through online users.
-// This is inefficient but fine for small scale.
-async function findUidByShortId(shortId) {
-    return new Promise((resolve) => {
-        const allUsersRef = ref(db, 'users');
-        onValue(allUsersRef, (snapshot) => {
-            const users = snapshot.val() || {};
-            for (const uid in users) {
-                if (users[uid].id === shortId) {
-                    resolve(uid);
-                    return;
-                }
-            }
-            resolve(null);
-        }, { onlyOnce: true });
-    });
-}
-
-function handleSignal(signal) {
-    // 1. Message
-    if (signal.type === 'message') {
-        addMessageToUI(signal.fromId, signal.data.text, false);
+    gameRole.textContent = isController ? "You are Controlling" : "Spectating Partner";
+    if (isController) {
+        gameControls.classList.remove('hidden');
+    } else {
+        gameControls.classList.add('hidden');
     }
-    // 2. Game Invite
-    else if (signal.type === 'game_invite') {
-        const accept = confirm(`Player ${signal.fromId} wants to play with you! Accept?`);
-        if (accept) {
-            // Send accept signal
-            findUidByShortId(signal.fromId).then(targetUid => {
-                if (targetUid) {
-                    sendSignal(targetUid, 'game_accept', {});
-                    startGameLine(signal.fromId, targetUid, false); // I am guest
-                }
-            });
+    startGameLoop();
+});
+
+connection.on("UpdateSpeed", (speed) => {
+    currentBallSpeed = speed;
+});
+
+connection.on("PartnerDisconnected", () => {
+    alert("Partner disconnected. Game over.");
+    exitGame();
+});
+
+connection.on("UpdateOnlineUsers", (users) => {
+    onlineUsers = users;
+    renderOnlineUsers(users);
+});
+
+// UI Actions
+btnRegister.onclick = async () => {
+    try {
+        if (connection.state === signalR.HubConnectionState.Disconnected) {
+            await connection.start();
+        }
+        const savedId = localStorage.getItem(STORAGE_KEY);
+        await connection.invoke("Register", savedId);
+    } catch (err) {
+        console.error("Connection failed: ", err);
+        alert("Failed to connect to server. Make sure the backend is running.");
+    }
+};
+
+btnEditId.onclick = async () => {
+    let newId = prompt("Enter your new custom ID (max 20 chars):", myId);
+    if (newId) {
+        newId = newId.trim();
+        if (newId === myId) return;
+
+        if (newId.length > 20 || newId.length < 1) {
+            alert("ID must be between 1 and 20 characters.");
+            return;
+        }
+
+        try {
+            await connection.invoke("ChangeId", newId);
+        } catch (err) {
+            console.error(err);
+            alert("Failed to send request. Check your connection.");
         }
     }
-    // 3. Game Accept
-    else if (signal.type === 'game_accept') {
-        alert(`${signal.fromId} accepted! Game starting.`);
-        findUidByShortId(signal.fromId).then(targetUid => {
-            startGameLine(signal.fromId, targetUid, true); // I am host
-        });
-    }
-    // 4. Game Sync
-    else if (signal.type === 'game_sync') {
-        if (appScreens.game.classList.contains('hidden')) return; // Ignore if not in game
-        if (signal.data.speed) {
-            updateBallSpeed(signal.data.speed);
+};
+
+// Auto-start if we have a saved ID
+(async () => {
+    const savedId = localStorage.getItem(STORAGE_KEY);
+    if (savedId) {
+        try {
+            await connection.start();
+            await connection.invoke("Register", savedId);
+            // Auto enter chat if we were already registered
+            authSection.classList.add('hidden');
+            chatSection.classList.remove('hidden');
+        } catch (err) {
+            console.warn("Auto-reconnect failed:", err);
         }
     }
-    // 5. Emoticon
-    else if (signal.type === 'emoticon') {
-        showEmoticon(signal.data.emoji);
+})();
+
+btnEnterChat.onclick = () => {
+    authSection.classList.add('hidden');
+    chatSection.classList.remove('hidden');
+    chatSection.classList.add('fade-in');
+};
+
+btnOpenUnread.onclick = async () => {
+    try {
+        await connection.invoke("FetchUnreadMessages");
+    } catch (err) {
+        console.error(err);
+    }
+};
+
+// Play Together Actions
+btnPlayTogether.onclick = async () => {
+    if (matchText.textContent === 'Idle') {
+        await connection.invoke("JoinMatchmaking");
+        btnPlayTogether.textContent = "Cancel Matchmaking";
+    } else {
+        await connection.invoke("LeaveMatchmaking");
+        btnPlayTogether.textContent = "Play Now";
+    }
+};
+
+btnStartGame.onclick = async () => {
+    await connection.invoke("StartGame");
+};
+
+btnExitGame.onclick = exitGame;
+
+async function exitGame() {
+    gameActive = false;
+    gameOverlay.classList.add('hidden');
+    btnStartGame.classList.add('hidden');
+    btnPlayTogether.classList.remove('hidden');
+    matchText.textContent = 'Idle';
+    matchDot.className = 'dot dot-idle';
+    btnPlayTogether.textContent = "Play Now";
+
+    // Reset game state
+    currentBallSpeed = 10;
+    speedSlider.value = 10;
+
+    try {
+        await connection.invoke("QuitGame");
+    } catch (err) {
+        console.error("Failed to quit game on server:", err);
     }
 }
 
+btnViewOnline.onclick = () => {
+    onlineModal.classList.remove('hidden');
+    renderOnlineModal();
+};
 
-// --- CHAT LOGIC ---
-ui.btnSend.addEventListener('click', sendMessage);
-ui.msgInput.addEventListener('keypress', (e) => {
+btnCloseOnline.onclick = () => {
+    onlineModal.classList.add('hidden');
+};
+
+btnSelectUser.onclick = () => {
+    userModal.classList.remove('hidden');
+    renderModalUsers();
+};
+
+btnCloseModal.onclick = () => {
+    userModal.classList.add('hidden');
+};
+
+// Close modals when clicking outside
+window.onclick = (event) => {
+    if (event.target === userModal) {
+        userModal.classList.add('hidden');
+    }
+    if (event.target === onlineModal) {
+        onlineModal.classList.add('hidden');
+    }
+    if (event.target === settingsModal) {
+        settingsModal.classList.add('hidden');
+    }
+};
+
+// Profile Settings Actions
+btnSettings.onclick = () => {
+    const savedSettings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{"gender":"Non-binary", "interest":"Both"}');
+    selectGender.value = savedSettings.gender;
+    selectInterest.value = savedSettings.interest;
+    settingsModal.classList.remove('hidden');
+};
+
+btnCloseSettings.onclick = () => {
+    settingsModal.classList.add('hidden');
+};
+
+btnSaveSettings.onclick = async () => {
+    const gender = selectGender.value;
+    const interest = selectInterest.value;
+    const settings = { gender, interest };
+
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+
+    // Close modal immediately as requested
+    settingsModal.classList.add('hidden');
+    updateGenderSymbol(gender);
+
+    try {
+        await connection.invoke("UpdateProfile", gender, interest);
+    } catch (err) {
+        console.error(err);
+        alert("Failed to sync settings with server, but they are saved locally.");
+    }
+};
+
+function updateGenderSymbol(gender) {
+    if (!genderSymbolDisplay) return;
+    const symbol = GENDER_SYMBOLS[gender] || "";
+    genderSymbolDisplay.textContent = symbol;
+    genderSymbolDisplay.className = `gender-symbol-mini gender-${gender.toLowerCase()}`;
+}
+
+function renderModalUsers() {
+    modalUserList.innerHTML = '';
+    // Show other users except self
+    const others = onlineUsers.filter(u => u.id !== myId);
+
+    if (others.length === 0) {
+        modalUserList.innerHTML = '<p style="text-align: center; opacity: 0.5; padding: 20px;">No other players online yet.</p>';
+        return;
+    }
+
+    others.forEach(user => {
+        const div = document.createElement('div');
+        div.className = 'modal-user-item';
+
+        const nameWrapper = document.createElement('div');
+        nameWrapper.style.position = "relative";
+        nameWrapper.style.display = "inline-block";
+
+        const name = document.createElement('span');
+        name.textContent = user.id;
+
+        const symbol = document.createElement('span');
+        symbol.className = `gender-symbol-mini gender-${user.gender.toLowerCase()}`;
+        symbol.style.right = "-12px";
+        symbol.textContent = GENDER_SYMBOLS[user.gender] || "";
+
+        nameWrapper.appendChild(name);
+        nameWrapper.appendChild(symbol);
+
+        const statusSpan = document.createElement('span');
+        statusSpan.className = `status-text status-${user.status.toLowerCase()}`;
+        statusSpan.textContent = user.status;
+
+        div.appendChild(nameWrapper);
+        div.appendChild(statusSpan);
+
+        div.onclick = () => {
+            targetIdInput.value = user.id;
+            userModal.classList.add('hidden');
+            updateRecipientIndicator();
+        };
+        modalUserList.appendChild(div);
+    });
+}
+
+function renderOnlineModal() {
+    onlineModalList.innerHTML = '';
+
+    if (onlineUsers.length === 0) {
+        onlineModalList.innerHTML = '<p style="text-align: center; opacity: 0.5; padding: 20px;">No one is online.</p>';
+        return;
+    }
+
+    onlineUsers.forEach(user => {
+        const div = document.createElement('div');
+        div.className = 'online-user-item-modal';
+
+        const dot = document.createElement('span');
+        dot.className = `online-user-dot dot-${user.status.toLowerCase()}`;
+
+        const nameWrapper = document.createElement('div');
+        nameWrapper.style.position = "relative";
+        nameWrapper.style.display = "inline-block";
+        nameWrapper.style.flex = "1";
+
+        const name = document.createElement('span');
+        name.textContent = user.id + (user.id === myId ? ' (You)' : '');
+
+        const symbol = document.createElement('span');
+        symbol.className = `gender-symbol-mini gender-${user.gender.toLowerCase()}`;
+        symbol.style.right = user.id === myId ? "-20px" : "-12px";
+        symbol.textContent = GENDER_SYMBOLS[user.gender] || "";
+
+        nameWrapper.appendChild(name);
+        nameWrapper.appendChild(symbol);
+
+        const statusText = document.createElement('span');
+        statusText.className = `status-label status-${user.status.toLowerCase()}`;
+        statusText.textContent = user.status;
+
+        div.appendChild(dot);
+        div.appendChild(nameWrapper);
+        div.appendChild(statusText);
+        onlineModalList.appendChild(div);
+    });
+}
+
+speedSlider.oninput = async () => {
+    if (isController) {
+        currentBallSpeed = parseFloat(speedSlider.value);
+        await connection.invoke("UpdateBallSpeed", currentBallSpeed);
+    }
+};
+
+function startGameLoop() {
+    if (!gameActive) return;
+
+    // Movement calculation
+    ballPosY += (currentBallSpeed * 0.1) * ballDirection;
+
+    // Boundary check
+    if (ballPosY > 90) {
+        ballPosY = 90;
+        ballDirection = -1;
+    } else if (ballPosY < 5) {
+        ballPosY = 5;
+        ballDirection = 1;
+    }
+
+    gameBall.style.top = ballPosY + "%";
+
+    requestAnimationFrame(startGameLoop);
+}
+
+function renderOnlineUsers(users) {
+    // We only need to store the users now, the modal will handle the rendering when opened
+    onlineUsers = users;
+}
+
+btnSend.onclick = sendMessage;
+messageInput.onkeypress = (e) => {
     if (e.key === 'Enter') sendMessage();
-});
+};
 
 async function sendMessage() {
-    const text = ui.msgInput.value.trim();
-    const targetId = ui.targetIdInput.value.trim().toUpperCase();
+    const targetId = targetIdInput.value.trim();
+    const text = messageInput.value.trim();
 
+    if (!targetId) {
+        alert("Please enter a target ID.");
+        return;
+    }
     if (!text) return;
-    if (!targetId || targetId === "--------") {
-        alert("Please enter a Target ID or select a user.");
-        return;
-    }
 
-    const targetUid = await findUidByShortId(targetId);
-    if (!targetUid) {
-        alert("User not found or offline.");
-        return;
-    }
-
-    // Send
-    sendSignal(targetUid, 'message', { text: text });
-
-    // UI update
-    addMessageToUI("ME", text, true);
-    ui.msgInput.value = '';
-}
-
-function addMessageToUI(sender, text, isMe) {
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `message ${isMe ? 'message-sent' : 'message-received'}`;
-
-    const content = `
-        <div class="message-sender">${sender}</div>
-        <div class="message-text">${text}</div>
-    `;
-    msgDiv.innerHTML = content;
-    ui.msgList.appendChild(msgDiv);
-    ui.msgList.scrollTop = ui.msgList.scrollHeight;
-
-    // Remove empty state if exists
-    const empty = ui.msgList.querySelector('.empty-state');
-    if (empty) empty.remove();
-}
-
-
-// --- ONLINE USERS UI ---
-function renderOnlineUsers(users) {
-    ui.onlineList.innerHTML = '';
-    ui.userList.innerHTML = ''; // Select modal
-
-    let count = 0;
-
-    for (const uid in users) {
-        if (uid === currentUser?.uid) continue; // Skip self
-
-        const user = users[uid];
-        const el = document.createElement('div');
-        el.className = 'user-card';
-        el.innerHTML = `
-            <div class="user-info-row">
-                <span class="user-id-badge">${user.id}</span>
-                <span class="user-gender">${getGenderEmoji(user.gender)}</span>
-            </div>
-            <button class="btn-tiny" onclick="selectUser('${user.id}')">Chat</button>
-        `;
-
-        ui.onlineList.appendChild(el.cloneNode(true)); // For "Online Users" Modal
-        ui.userList.appendChild(el); // For "Select User" Modal
-
-        count++;
+    try {
+        await connection.invoke("SendMessageToId", targetId, text);
+        appendMessage("You", text, 'sent');
+        messageInput.value = "";
+    } catch (err) {
+        console.error(err);
     }
 }
 
-function getGenderEmoji(g) {
-    if (g === 'Male') return '♂️';
-    if (g === 'Female') return '♀️';
-    return '⚧';
+function appendMessage(sender, text, type) {
+    const emptyState = document.querySelector('.empty-state');
+    if (emptyState) emptyState.remove();
+
+    const div = document.createElement('div');
+    div.className = `message-bubble message-${type}`;
+
+    const senderSpan = document.createElement('span');
+    senderSpan.className = 'message-sender';
+    senderSpan.textContent = sender;
+
+    const textNode = document.createTextNode(text);
+
+    div.appendChild(senderSpan);
+    div.appendChild(textNode);
+
+    messagesList.appendChild(div);
+    messagesList.scrollTop = messagesList.scrollHeight;
 }
 
-// Expose to window for onclick
-window.selectUser = (id) => {
-    ui.targetIdInput.value = id;
-    ui.recipientIndicator.textContent = `Chatting with: ${id}`;
-    ui.recipientIndicator.classList.remove('hidden');
-    ui.onlineModal.classList.add('hidden');
-    ui.userModal.classList.add('hidden');
-    currentPartnerId = id; // Store for game invite
+btnLogout.onclick = () => {
+    location.reload();
 };
 
-
-// --- GAME LOGIC ---
-ui.btnPlay.addEventListener('click', async () => {
-    const targetId = ui.targetIdInput.value.trim().toUpperCase();
-    if (!targetId || targetId.length < 3) {
-        alert("Select a user first!");
-        return;
-    }
-
-    const targetUid = await findUidByShortId(targetId);
-    if (!targetUid) {
-        alert("User offline.");
-        return;
-    }
-
-    sendSignal(targetUid, 'game_invite', {});
-    alert(`Invite sent to ${targetId}. Waiting for acceptance...`);
-});
-
-function startGameLine(partnerShortId, partnerUid, isHost) {
-    currentPartnerId = partnerUid; // store UID not shortID for signals
-    isGameHost = isHost;
-
-    ui.gamePartnerName.textContent = partnerShortId;
-    ui.gameRole.textContent = isHost ? "Controller (You)" : "Follower";
-
-    appScreens.game.classList.remove('hidden');
-
-    if (isHost) {
-        ui.gameControls.classList.remove('hidden');
-        // Start heartbeat to sync speed
-        gameInterval = setInterval(() => {
-            const speed = ui.gameSpeedSlider.value;
-            sendSignal(partnerUid, 'game_sync', { speed: speed });
-            updateBallSpeed(speed); // Local update
-        }, 1000);
+function updateRecipientIndicator() {
+    const val = targetIdInput.value.trim();
+    if (val) {
+        recipientIndicator.textContent = `Sending to: ${val}`;
+        recipientIndicator.classList.remove('hidden');
     } else {
-        ui.gameControls.classList.add('hidden');
+        recipientIndicator.classList.add('hidden');
     }
 }
 
-ui.btnExitGame.addEventListener('click', () => {
-    appScreens.game.classList.add('hidden');
-    if (gameInterval) clearInterval(gameInterval);
-});
+targetIdInput.oninput = updateRecipientIndicator;
 
-// Settings & Modals Logic
-ui.btnViewOnline.onclick = () => ui.onlineModal.classList.remove('hidden');
-ui.btnCloseOnline.onclick = () => ui.onlineModal.classList.add('hidden');
-ui.btnSelectUser.onclick = () => ui.userModal.classList.remove('hidden');
-ui.btnCloseUser.onclick = () => ui.userModal.classList.add('hidden');
-ui.btnSettings.onclick = () => ui.settingsModal.classList.remove('hidden');
-ui.btnCloseSettings.onclick = () => ui.settingsModal.classList.add('hidden');
-
-ui.btnSaveSettings.onclick = () => {
-    const g = ui.selectGender.value;
-    const i = ui.selectInterest.value;
-    updateUserProfile(g, i);
-    ui.settingsModal.classList.add('hidden');
-    alert("Profile saved!");
-};
-
-// Emoticons
-document.querySelectorAll('.emoticon-btn-compact').forEach(btn => {
-    btn.addEventListener('click', async () => {
-        const em = btn.getAttribute('data-emoticon');
-        showEmoticon(em); // Show locally
-        if (currentPartnerId) {
-            sendSignal(currentPartnerId, 'emoticon', { emoji: em });
-        }
+// Ensure selecting from modal also updates indicator
+const originalRenderModalUsers = renderModalUsers;
+renderModalUsers = function () {
+    originalRenderModalUsers();
+    const items = modalUserList.querySelectorAll('.modal-user-item');
+    items.forEach(item => {
+        const originalOnClick = item.onclick;
+        item.onclick = (e) => {
+            originalOnClick(e);
+            updateRecipientIndicator();
+        };
     });
-});
-
-function showEmoticon(emoji) {
-    const notif = document.getElementById('emoticon-notification');
-    notif.textContent = emoji;
-    notif.classList.remove('hidden');
-    notif.classList.add('fade-in');
-
-    setTimeout(() => {
-        notif.classList.add('hidden');
-        notif.classList.remove('fade-in');
-    }, 2000);
-}
-
-// Game Visuals
-function updateBallSpeed(val) {
-    // 150 = fast, 1 = slow. Animation duration is inverse.
-    // Base duration 2s. Min duration 0.2s.
-    // Linear interpolation:
-    // Speed 1 -> 5s
-    // Speed 150 -> 0.1s
-    // Simplified: speed=10 is default.
-    const duration = 2000 / val;
-    ui.gameBall.style.animationDuration = `${duration}ms`;
-}
+};
